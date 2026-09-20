@@ -67,7 +67,7 @@ export class EarthGlobe {
     // Ocean body
     const ocean = new THREE.Mesh(
       new THREE.SphereGeometry(R * 0.995, 72, 72),
-      new THREE.MeshBasicMaterial({ color: 0x08111a }),
+      new THREE.MeshBasicMaterial({ color: 0x0a151f }),
     )
     this.globe.add(ocean)
 
@@ -171,8 +171,7 @@ export class EarthGlobe {
         g.type === 'MultiPolygon' ? g.coordinates : [g.coordinates],
       )
 
-      // Bounding-box prefilter so random samples only run point-in-polygon
-      // against polygons that could contain them
+      // Per-polygon bboxes and approximate areas (cos-lat corrected)
       const boxes = polygons.map((poly) => {
         let minLon = 180, maxLon = -180, minLat = 90, maxLat = -90
         for (const [lon, lat] of poly[0]) {
@@ -181,26 +180,32 @@ export class EarthGlobe {
           if (lat < minLat) minLat = lat
           if (lat > maxLat) maxLat = lat
         }
-        return { minLon, maxLon, minLat, maxLat }
+        const midLat = (minLat + maxLat) / 2
+        const area = (maxLon - minLon) * (maxLat - minLat) * Math.cos((midLat * Math.PI) / 180)
+        return { minLon, maxLon, minLat, maxLat, area: Math.max(area, 0.0001) }
       })
+      const totalArea = boxes.reduce((a, b) => a + b.area, 0)
 
+      // Allocate dots to polygons in proportion to their area, then
+      // rejection-sample inside each polygon's own bbox - dense where the
+      // land is big, but every island still gets its dots
       const positions: number[] = []
-      const TARGET = 16000
-      let guard = 0
-      // Rejection-sample the sphere; keep points that fall on land
-      while (positions.length / 3 < TARGET && guard < TARGET * 60) {
-        guard++
-        const lon = Math.random() * 360 - 180
-        const lat = (Math.acos(2 * Math.random() - 1) * 180) / Math.PI - 90
-        for (let p = 0; p < polygons.length; p++) {
-          const b = boxes[p]
-          if (lon < b.minLon || lon > b.maxLon || lat < b.minLat || lat > b.maxLat) continue
-          if (pointInPolygon(lon, lat, polygons[p])) {
-            const v = latLonToVec3(lat, lon, R * 1.001)
-            positions.push(v.x, v.y, v.z)
-            this.landDirs.push(v.clone().normalize())
-            break
-          }
+      const TARGET = 60000
+      for (let p = 0; p < polygons.length; p++) {
+        const b = boxes[p]
+        const share = Math.round((b.area / totalArea) * TARGET)
+        const n = Math.max(2, Math.min(share, 20000))
+        let placed = 0
+        let guard = 0
+        while (placed < n && guard < n * 60) {
+          guard++
+          const lon = b.minLon + Math.random() * (b.maxLon - b.minLon)
+          const lat = b.minLat + Math.random() * (b.maxLat - b.minLat)
+          if (!pointInPolygon(lon, lat, polygons[p])) continue
+          const v = latLonToVec3(lat, lon, R * 1.001)
+          positions.push(v.x, v.y, v.z)
+          this.landDirs.push(v.clone().normalize())
+          placed++
         }
       }
 
@@ -210,7 +215,7 @@ export class EarthGlobe {
       geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
       this.landPoints = new THREE.Points(
         geo,
-        new THREE.PointsMaterial({ size: 0.0095, vertexColors: true, sizeAttenuation: true }),
+        new THREE.PointsMaterial({ size: 0.008, vertexColors: true, sizeAttenuation: true }),
       )
       this.globe.add(this.landPoints)
     } catch {
@@ -222,12 +227,12 @@ export class EarthGlobe {
     if (!this.landPoints) return
     const sunDir = latLonToVec3(sunLat, sunLon, 1).normalize()
     const attr = this.landPoints.geometry.getAttribute('color') as THREE.BufferAttribute
-    const day = new THREE.Color(0xcfd8dd)
-    const night = new THREE.Color(0x2e3f4e)
+    const day = new THREE.Color(0xe8eef0)
+    const night = new THREE.Color(0x55707f)
     const tmp = new THREE.Color()
     for (let i = 0; i < this.landDirs.length; i++) {
       const d = this.landDirs[i].dot(sunDir)
-      const t = THREE.MathUtils.smoothstep(d, -0.12, 0.25)
+      const t = THREE.MathUtils.smoothstep(d, -0.18, 0.3)
       tmp.copy(night).lerp(day, t)
       attr.setXYZ(i, tmp.r, tmp.g, tmp.b)
     }
@@ -261,7 +266,7 @@ export class EarthGlobe {
     this.pings = []
     const now = performance.now()
     events.forEach((e, i) => {
-      const geo = new THREE.RingGeometry(0.008, 0.011, 40)
+      const geo = new THREE.RingGeometry(0.006, 0.008, 40)
       const mat = new THREE.MeshBasicMaterial({
         color: e.color,
         transparent: true,
@@ -324,9 +329,9 @@ export class EarthGlobe {
     for (const p of this.pings) {
       const t = ((now - p.born - p.delay) % 2800) / 2800
       if (t < 0) continue
-      const s = 1 + t * (5 + p.strength * 7)
+      const s = 1 + t * (2.5 + p.strength * 3.5)
       p.mesh.scale.setScalar(s)
-      ;(p.mesh.material as THREE.MeshBasicMaterial).opacity = (1 - t) * 0.75
+      ;(p.mesh.material as THREE.MeshBasicMaterial).opacity = (1 - t) * 0.55
     }
     this.renderer.render(this.scene, this.camera)
   }
