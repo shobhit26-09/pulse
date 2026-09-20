@@ -11,6 +11,9 @@ export interface GlobeEvent {
 }
 
 const R = 1
+const DAY_TEX =
+  'https://cdn.jsdelivr.net/npm/three-globe@2.31.0/example/img/earth-blue-marble.jpg'
+const NIGHT_TEX = 'https://cdn.jsdelivr.net/npm/three-globe@2.31.0/example/img/earth-night.jpg'
 
 function pointInRing(lon: number, lat: number, ring: number[][]): boolean {
   let inside = false
@@ -34,6 +37,12 @@ function pointInPolygon(lon: number, lat: number, polygon: number[][][]): boolea
   return true
 }
 
+function blankTexture(): THREE.DataTexture {
+  const t = new THREE.DataTexture(new Uint8Array([4, 7, 11, 255]), 1, 1)
+  t.needsUpdate = true
+  return t
+}
+
 export class EarthGlobe {
   private renderer: THREE.WebGLRenderer
   private scene = new THREE.Scene()
@@ -41,6 +50,14 @@ export class EarthGlobe {
   private globe = new THREE.Group()
   private frame = 0
   private disposed = false
+
+  private surfaceUniforms = {
+    uDay: { value: blankTexture() as THREE.Texture },
+    uNight: { value: blankTexture() as THREE.Texture },
+    uSun: { value: new THREE.Vector3(1, 0, 0) },
+  }
+  private sunLocal = new THREE.Vector3(1, 0, 0)
+  private usingTexture = false
 
   private landPoints: THREE.Points | null = null
   private landDirs: THREE.Vector3[] = []
@@ -64,22 +81,78 @@ export class EarthGlobe {
     this.camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100)
     this.camera.position.set(0, 0, 3.1)
 
-    // Ocean body
-    const ocean = new THREE.Mesh(
-      new THREE.SphereGeometry(R * 0.995, 72, 72),
-      new THREE.MeshBasicMaterial({ color: 0x0a151f }),
+    // Dark backstop inside the textured surface
+    const inner = new THREE.Mesh(
+      new THREE.SphereGeometry(R * 0.985, 72, 72),
+      new THREE.MeshBasicMaterial({ color: 0x04070b }),
     )
-    this.globe.add(ocean)
+    this.globe.add(inner)
+
+    // Textured Earth: Blue Marble by day, city lights by night,
+    // sun glint on the oceans, soft terminator
+    const surface = new THREE.Mesh(
+      new THREE.SphereGeometry(R, 96, 96),
+      new THREE.ShaderMaterial({
+        uniforms: this.surfaceUniforms,
+        vertexShader: `
+          varying vec2 vUv;
+          varying vec3 vN;
+          varying vec3 vP;
+          void main() {
+            vUv = uv;
+            vN = normalize(normalMatrix * normal);
+            vec4 mv = modelViewMatrix * vec4(position, 1.0);
+            vP = mv.xyz;
+            gl_Position = projectionMatrix * mv;
+          }`,
+        fragmentShader: `
+          uniform sampler2D uDay;
+          uniform sampler2D uNight;
+          uniform vec3 uSun;
+          varying vec2 vUv;
+          varying vec3 vN;
+          varying vec3 vP;
+          void main() {
+            vec3 n = normalize(vN);
+            vec3 v = normalize(-vP);
+            vec3 s = normalize(uSun);
+            float d = dot(n, s);
+            float dayAmt = smoothstep(-0.10, 0.30, d);
+
+            vec3 dayCol = texture2D(uDay, vUv).rgb;
+            float lum = dot(dayCol, vec3(0.299, 0.587, 0.114));
+            dayCol = mix(vec3(lum), dayCol, 1.14) * 1.05;
+
+            // glossy sun glint on the water
+            vec3 h = normalize(s + v);
+            float water = smoothstep(0.20, 0.05, lum);
+            float spec = pow(max(dot(n, h), 0.0), 90.0) * water * 0.55;
+
+            // soft atmospheric limb on the lit side
+            float rim = pow(1.0 - max(dot(n, v), 0.0), 2.0);
+
+            vec3 dayLit = dayCol * (0.30 + 0.85 * dayAmt)
+              + spec * vec3(0.85, 0.92, 1.0) * dayAmt
+              + vec3(0.20, 0.32, 0.45) * rim * 0.30 * dayAmt;
+
+            vec3 cityLights = texture2D(uNight, vUv).rgb * vec3(1.0, 0.88, 0.62) * 1.6;
+            vec3 nightCol = dayCol * 0.045 + vec3(0.010, 0.016, 0.026) + cityLights;
+
+            gl_FragColor = vec4(mix(nightCol, dayLit, dayAmt), 1.0);
+          }`,
+      }),
+    )
+    this.globe.add(surface)
 
     // Atmosphere: backside fresnel shell
     const atmo = new THREE.Mesh(
-      new THREE.SphereGeometry(R * 1.06, 72, 72),
+      new THREE.SphereGeometry(R * 1.075, 72, 72),
       new THREE.ShaderMaterial({
         side: THREE.BackSide,
         transparent: true,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
-        uniforms: { c: { value: new THREE.Color(0x274b63) } },
+        uniforms: { c: { value: new THREE.Color(0x3d6d9e) } },
         vertexShader: `
           varying vec3 vN; varying vec3 vP;
           void main() {
@@ -91,8 +164,8 @@ export class EarthGlobe {
         fragmentShader: `
           uniform vec3 c; varying vec3 vN; varying vec3 vP;
           void main() {
-            float f = pow(1.0 - abs(dot(normalize(vN), normalize(-vP))), 3.5);
-            gl_FragColor = vec4(c, f * 0.9);
+            float f = pow(1.0 - abs(dot(normalize(vN), normalize(-vP))), 3.0);
+            gl_FragColor = vec4(c, f * 0.85);
           }`,
       }),
     )
@@ -104,12 +177,12 @@ export class EarthGlobe {
     // ISS marker
     this.issMesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.012, 16, 16),
-      new THREE.MeshBasicMaterial({ color: 0xf5c76a }),
+      new THREE.MeshBasicMaterial({ color: 0xffd60a }),
     )
     this.issGlow = new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: glowTexture(),
-        color: 0xf5c76a,
+        color: 0xffd60a,
         transparent: true,
         opacity: 0.85,
         depthWrite: false,
@@ -124,7 +197,7 @@ export class EarthGlobe {
     trailGeo.setAttribute('position', new THREE.BufferAttribute(this.trailPositions, 3))
     this.trail = new THREE.Line(
       trailGeo,
-      new THREE.LineBasicMaterial({ color: 0xf5c76a, transparent: true, opacity: 0.4 }),
+      new THREE.LineBasicMaterial({ color: 0xffd60a, transparent: true, opacity: 0.38 }),
     )
     this.trail.frustumCulled = false
     this.globe.add(this.trail)
@@ -132,24 +205,25 @@ export class EarthGlobe {
     this.scene.add(this.globe)
     this.attachInput()
     this.resize()
-    this.loadLand()
+    this.loadSurface()
     this.loop()
   }
 
   private graticule(): THREE.LineSegments {
     const pts: number[] = []
     const step = 2
+    const r = R * 1.002
     for (let lat = -75; lat <= 75; lat += 15) {
       for (let lon = -180; lon < 180; lon += step) {
-        const a = latLonToVec3(lat, lon, R)
-        const b = latLonToVec3(lat, lon + step, R)
+        const a = latLonToVec3(lat, lon, r)
+        const b = latLonToVec3(lat, lon + step, r)
         pts.push(a.x, a.y, a.z, b.x, b.y, b.z)
       }
     }
     for (let lon = -180; lon < 180; lon += 15) {
       for (let lat = -88; lat < 88; lat += step) {
-        const a = latLonToVec3(lat, lon, R)
-        const b = latLonToVec3(lat + step, lon, R)
+        const a = latLonToVec3(lat, lon, r)
+        const b = latLonToVec3(lat + step, lon, r)
         pts.push(a.x, a.y, a.z, b.x, b.y, b.z)
       }
     }
@@ -157,10 +231,45 @@ export class EarthGlobe {
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3))
     return new THREE.LineSegments(
       geo,
-      new THREE.LineBasicMaterial({ color: 0x14222e, transparent: true, opacity: 0.55 }),
+      new THREE.LineBasicMaterial({ color: 0x9fb6c6, transparent: true, opacity: 0.13 }),
     )
   }
 
+  private loadSurface() {
+    const loader = new THREE.TextureLoader()
+    loader.setCrossOrigin('anonymous')
+    const maxAniso = Math.min(8, this.renderer.capabilities.getMaxAnisotropy())
+    const prep = (t: THREE.Texture) => {
+      t.colorSpace = THREE.SRGBColorSpace
+      t.anisotropy = maxAniso
+      return t
+    }
+    let failed = false
+    const onError = () => {
+      if (failed) return
+      failed = true
+      this.loadLand() // dot-field fallback if the textures can't load
+    }
+    loader.load(
+      DAY_TEX,
+      (t) => {
+        this.surfaceUniforms.uDay.value = prep(t)
+        this.usingTexture = true
+      },
+      undefined,
+      onError,
+    )
+    loader.load(
+      NIGHT_TEX,
+      (t) => {
+        this.surfaceUniforms.uNight.value = prep(t)
+      },
+      undefined,
+      onError,
+    )
+  }
+
+  // Fallback only: rejection-sampled land dots if CDN textures fail
   private async loadLand() {
     try {
       const res = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json')
@@ -170,8 +279,6 @@ export class EarthGlobe {
       const polygons: number[][][][] = geoms.flatMap((g: any) =>
         g.type === 'MultiPolygon' ? g.coordinates : [g.coordinates],
       )
-
-      // Per-polygon bboxes and approximate areas (cos-lat corrected)
       const boxes = polygons.map((poly) => {
         let minLon = 180, maxLon = -180, minLat = 90, maxLat = -90
         for (const [lon, lat] of poly[0]) {
@@ -185,10 +292,6 @@ export class EarthGlobe {
         return { minLon, maxLon, minLat, maxLat, area: Math.max(area, 0.0001) }
       })
       const totalArea = boxes.reduce((a, b) => a + b.area, 0)
-
-      // Allocate dots to polygons in proportion to their area, then
-      // rejection-sample inside each polygon's own bbox - dense where the
-      // land is big, but every island still gets its dots
       const positions: number[] = []
       const TARGET = 60000
       for (let p = 0; p < polygons.length; p++) {
@@ -208,7 +311,6 @@ export class EarthGlobe {
           placed++
         }
       }
-
       const geo = new THREE.BufferGeometry()
       geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
       const colors = new Float32Array((positions.length / 3) * 3)
@@ -218,25 +320,30 @@ export class EarthGlobe {
         new THREE.PointsMaterial({ size: 0.008, vertexColors: true, sizeAttenuation: true }),
       )
       this.globe.add(this.landPoints)
+      this.recolorDots()
     } catch {
       // Globe still works (graticule + events) if the land fetch fails
     }
   }
 
-  setSun(sunLat: number, sunLon: number) {
+  private recolorDots() {
     if (!this.landPoints) return
-    const sunDir = latLonToVec3(sunLat, sunLon, 1).normalize()
     const attr = this.landPoints.geometry.getAttribute('color') as THREE.BufferAttribute
     const day = new THREE.Color(0xe8eef0)
     const night = new THREE.Color(0x55707f)
     const tmp = new THREE.Color()
     for (let i = 0; i < this.landDirs.length; i++) {
-      const d = this.landDirs[i].dot(sunDir)
+      const d = this.landDirs[i].dot(this.sunLocal)
       const t = THREE.MathUtils.smoothstep(d, -0.18, 0.3)
       tmp.copy(night).lerp(day, t)
       attr.setXYZ(i, tmp.r, tmp.g, tmp.b)
     }
     attr.needsUpdate = true
+  }
+
+  setSun(sunLat: number, sunLon: number) {
+    this.sunLocal = latLonToVec3(sunLat, sunLon, 1).normalize()
+    if (!this.usingTexture) this.recolorDots()
   }
 
   setIss(lat: number, lon: number, altitudeKm: number) {
@@ -324,6 +431,9 @@ export class EarthGlobe {
     if (this.autoRotate) this.targetRotY += 0.0006
     this.globe.rotation.y += (this.targetRotY - this.globe.rotation.y) * 0.06
     this.globe.rotation.x += (this.targetRotX - this.globe.rotation.x) * 0.06
+
+    // sun direction in view space (camera rotation is identity)
+    this.surfaceUniforms.uSun.value.copy(this.sunLocal).applyEuler(this.globe.rotation)
 
     const now = performance.now()
     for (const p of this.pings) {
