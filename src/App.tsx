@@ -16,13 +16,13 @@ import {
 import { Rail } from './components/Rail'
 import { Ticker } from './components/Ticker'
 
-const QUAKE_COLOR = 0xe2a35c
+const QUAKE_COLOR = 0xff9f0a
 const KIND_COLOR: Record<EarthEvent['kind'], number> = {
-  storm: 0x6f9ec4,
-  fire: 0xd95f3b,
-  volcano: 0xc97b4a,
-  ice: 0x9fc6d8,
-  other: 0x8b98a3,
+  storm: 0x64d2ff,
+  fire: 0xff6b4a,
+  volcano: 0xd0875c,
+  ice: 0xa8dcec,
+  other: 0x8e8e93,
 }
 
 export default function App() {
@@ -144,7 +144,7 @@ export default function App() {
           id: q.id,
           lat: q.lat,
           lon: q.lon,
-          color: q.mag >= 5 ? 0xd95f3b : QUAKE_COLOR,
+          color: q.mag >= 5 ? 0xff453a : QUAKE_COLOR,
           strength: Math.min(1, q.mag / 7),
         })),
       ...events.map((e) => ({
@@ -173,13 +173,12 @@ export default function App() {
       <main className="stage">
         <div className="globe-wrap">
           <canvas ref={canvasRef} className="globe-canvas" />
-          <div className="globe-hint">DRAG TO ROTATE</div>
+          <div className="globe-hint">Drag to rotate</div>
         </div>
         <Rail iss={iss} quakes={quakes} events={events} kp={kp} launches={launches} now={now} />
       </main>
 
       <Ticker quakes={quakes} events={events} />
-      <div className="grain" aria-hidden="true" />
     </div>
   )
 }
