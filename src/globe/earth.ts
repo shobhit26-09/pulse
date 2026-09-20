@@ -165,9 +165,11 @@ export class EarthGlobe {
     try {
       const res = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json')
       const topo = await res.json()
-      const land = feature(topo, topo.objects.land) as any
-      const polygons: number[][][][] =
-        land.geometry.type === 'MultiPolygon' ? land.geometry.coordinates : [land.geometry.coordinates]
+      const fc = feature(topo, topo.objects.land) as any
+      const geoms = fc.type === 'FeatureCollection' ? fc.features.map((f: any) => f.geometry) : [fc.geometry]
+      const polygons: number[][][][] = geoms.flatMap((g: any) =>
+        g.type === 'MultiPolygon' ? g.coordinates : [g.coordinates],
+      )
 
       // Bounding-box prefilter so random samples only run point-in-polygon
       // against polygons that could contain them
