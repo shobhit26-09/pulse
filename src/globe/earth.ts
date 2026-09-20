@@ -169,16 +169,31 @@ export class EarthGlobe {
       const polygons: number[][][][] =
         land.geometry.type === 'MultiPolygon' ? land.geometry.coordinates : [land.geometry.coordinates]
 
+      // Bounding-box prefilter so random samples only run point-in-polygon
+      // against polygons that could contain them
+      const boxes = polygons.map((poly) => {
+        let minLon = 180, maxLon = -180, minLat = 90, maxLat = -90
+        for (const [lon, lat] of poly[0]) {
+          if (lon < minLon) minLon = lon
+          if (lon > maxLon) maxLon = lon
+          if (lat < minLat) minLat = lat
+          if (lat > maxLat) maxLat = lat
+        }
+        return { minLon, maxLon, minLat, maxLat }
+      })
+
       const positions: number[] = []
       const TARGET = 16000
       let guard = 0
       // Rejection-sample the sphere; keep points that fall on land
-      while (positions.length / 3 < TARGET && guard < TARGET * 40) {
+      while (positions.length / 3 < TARGET && guard < TARGET * 60) {
         guard++
         const lon = Math.random() * 360 - 180
         const lat = (Math.acos(2 * Math.random() - 1) * 180) / Math.PI - 90
-        for (const poly of polygons) {
-          if (pointInPolygon(lon, lat, poly)) {
+        for (let p = 0; p < polygons.length; p++) {
+          const b = boxes[p]
+          if (lon < b.minLon || lon > b.maxLon || lat < b.minLat || lat > b.maxLat) continue
+          if (pointInPolygon(lon, lat, polygons[p])) {
             const v = latLonToVec3(lat, lon, R * 1.001)
             positions.push(v.x, v.y, v.z)
             this.landDirs.push(v.clone().normalize())
@@ -193,7 +208,7 @@ export class EarthGlobe {
       geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
       this.landPoints = new THREE.Points(
         geo,
-        new THREE.PointsMaterial({ size: 0.0085, vertexColors: true, sizeAttenuation: true }),
+        new THREE.PointsMaterial({ size: 0.0095, vertexColors: true, sizeAttenuation: true }),
       )
       this.globe.add(this.landPoints)
     } catch {
