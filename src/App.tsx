@@ -139,7 +139,7 @@ export default function App() {
   useEffect(() => {
     const globeEvents: GlobeEvent[] = [
       ...quakes
-        .filter((q) => q.mag >= 2.5)
+        .filter((q) => q.mag >= 3.5)
         .map((q) => ({
           id: q.id,
           lat: q.lat,
