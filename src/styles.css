@@ -357,7 +357,7 @@ body {
   border-color: rgba(255, 255, 255, 0.1);
 }
 .event-title {
-  color: var(--label1);
+  color: var(--label);
   font-size: 13px;
   font-weight: 500;
   line-height: 1.35;
