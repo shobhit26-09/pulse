@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { feature } from 'topojson-client'
 import { geoNaturalEarth1, geoPath, geoGraticule10 } from 'd3-geo'
+import { loadWorld } from '../lib/world'
 
 const W = 1000
 const H = 530
-const TOPO_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json'
 
 const KIND_COLOR = {
   storm: '#64d2ff',
@@ -14,7 +13,7 @@ const KIND_COLOR = {
   other: '#8e8e93',
 }
 
-export function WorldMap({ quakes, events, iss, trail, layers, selectedId, onSelect }) {
+export function WorldMap({ quakes, sigQuakes = [], events, iss, trail, layers, selectedId, onSelect }) {
   const [countries, setCountries] = useState(null)
   const [hoverId, setHoverId] = useState(null)
   const [view, setView] = useState({ k: 1, x: 0, y: 0 })
@@ -23,12 +22,9 @@ export function WorldMap({ quakes, events, iss, trail, layers, selectedId, onSel
 
   useEffect(() => {
     let alive = true
-    fetch(TOPO_URL)
-      .then((r) => r.json())
-      .then((topo) => {
-        if (!alive) return
-        const fc = feature(topo, topo.objects.countries)
-        setCountries(fc.features)
+    loadWorld()
+      .then((features) => {
+        if (alive) setCountries(features)
       })
       .catch(() => {})
     return () => {
@@ -171,6 +167,19 @@ export function WorldMap({ quakes, events, iss, trail, layers, selectedId, onSel
                   </g>
                 )
               })}
+          {layers.quakes &&
+            sigQuakes.map((q) => {
+              const p = mark(q.lat, q.lon)
+              if (!p) return null
+              const color = q.tier === 3 ? '#ff453a' : '#ffd60a'
+              return (
+                <g key={`sig-${q.id}`}>
+                  <circle cx={p[0]} cy={p[1]} r={(6 + q.mag) / view.k + 3} fill="none" stroke={color} strokeWidth={1.4 / view.k + 0.5} opacity="0.55" className="sig-pulse" />
+                  <circle cx={p[0]} cy={p[1]} r={(3 + q.mag) / view.k + 1.5} fill="none" stroke={color} strokeWidth={1.4 / view.k + 0.5} opacity="0.95" />
+                  <circle cx={p[0]} cy={p[1]} r={2 / view.k + 1} fill={color} />
+                </g>
+              )
+            })}
           {layers.iss && trail.length > 1 && (
             <polyline
               points={trail.map((t) => mark(t.lat, t.lon)?.join(',')).filter(Boolean).join(' ')}

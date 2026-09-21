@@ -3,9 +3,8 @@ import {
   fetchEarthEvents,
   fetchIss,
   fetchIssTrail,
-  fetchKpIndex,
-  fetchLaunches,
   fetchQuakes,
+  fetchSignificantQuakes,
 } from './lib/api'
 import { WorldMap } from './map/WorldMap'
 import { CountryPanel } from './components/CountryPanel'
@@ -16,6 +15,7 @@ export default function App() {
   const [iss, setIss] = useState(null)
   const [trail, setTrail] = useState([])
   const [quakes, setQuakes] = useState([])
+  const [sigQuakes, setSigQuakes] = useState([])
   const [events, setEvents] = useState([])
   const [now, setNow] = useState(() => new Date())
   const [selected, setSelected] = useState(null) // { id, name }
@@ -75,6 +75,22 @@ export default function App() {
     }
   }, [])
 
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      try {
+        const q = await fetchSignificantQuakes()
+        if (alive) setSigQuakes(q)
+      } catch {}
+    }
+    load()
+    const id = window.setInterval(load, 5 * 60000)
+    return () => {
+      alive = false
+      window.clearInterval(id)
+    }
+  }, [])
+
   const toggle = (k) => setLayers((l) => ({ ...l, [k]: !l[k] }))
 
   return (
@@ -92,6 +108,7 @@ export default function App() {
       <main className="stage">
         <WorldMap
           quakes={quakes}
+          sigQuakes={sigQuakes}
           events={events}
           iss={iss}
           trail={trail}
@@ -123,9 +140,12 @@ export default function App() {
               countryId={selected.id}
               fallbackName={selected.name}
               onClose={() => setSelected(null)}
+              sigQuakes={sigQuakes}
+              quakes={quakes}
+              events={events}
             />
           ) : (
-            <Feed />
+            <Feed sigQuakes={sigQuakes} events={events} />
           )}
         </div>
       </main>

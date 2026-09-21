@@ -3,6 +3,8 @@
 // call goes through a serial queue with generous spacing and results are
 // cached in memory. Errors surface to the UI as labeled fallbacks.
 
+import { classifyTitle } from './severity'
+
 const API = 'https://api.gdeltproject.org/api/v2/doc/doc'
 const MIN_GAP_MS = 6500
 const CACHE_TTL_MS = 15 * 60 * 1000
@@ -123,4 +125,61 @@ export function newsAge(seen) {
   const h = Math.floor(m / 60)
   if (h < 24) return `${h}h ago`
   return `${Math.floor(h / 24)}d ago`
+}
+
+const BREAKING_QUERY =
+  '(war OR airstrike OR missile OR invasion OR coup OR tsunami OR "state of emergency" OR ' +
+  'earthquake OR hurricane OR typhoon OR cyclone OR volcano OR wildfire OR flood OR ' +
+  'blackout OR "plane crash" OR sanctions OR killed OR protest OR ceasefire OR election OR summit) ' +
+  'sourcelang:english '
+
+// Global breaking board: GDELT majors, classified by severity; noise dropped.
+export function fetchBreakingGlobal() {
+  const key = 'breaking'
+  const hit = cached(key)
+  if (hit) return Promise.resolve({ events: hit, stale: false })
+  return enqueue(async () => {
+    const articles = clean(await gdelt(BREAKING_QUERY + MAJORS, { max: 40, timespan: '24h', sort: 'datedesc' }))
+    const events = []
+    for (const a of articles) {
+      const tier = classifyTitle(a.title)
+      if (!tier) continue
+      events.push({
+        id: `g:${a.url}`,
+        tier,
+        title: a.title,
+        url: a.url,
+        source: a.source,
+        seen: a.seen,
+        time: gdeltTime(a.seen),
+      })
+    }
+    cache.set(key, { ts: Date.now(), data: events })
+    return { events, stale: false }
+  })
+}
+
+// Major events for one country (majors only, classified).
+export function fetchCountryEvents(name) {
+  const key = `ce:${name}`
+  const hit = cached(key)
+  if (hit) return Promise.resolve({ events: hit, stale: false })
+  return enqueue(async () => {
+    const articles = clean(
+      await gdelt(`"${name}" ${BREAKING_QUERY}${MAJORS}`, { max: 20, timespan: '7d', sort: 'datedesc' }),
+    )
+    const events = []
+    for (const a of articles) {
+      const tier = classifyTitle(a.title)
+      if (!tier) continue
+      events.push({ id: `g:${a.url}`, tier, title: a.title, url: a.url, source: a.source, seen: a.seen, time: gdeltTime(a.seen) })
+    }
+    cache.set(key, { ts: Date.now(), data: events })
+    return { events, stale: false }
+  })
+}
+
+function gdeltTime(seen) {
+  if (!seen || seen.length < 14) return 0
+  return Date.UTC(+seen.slice(0, 4), +seen.slice(4, 6) - 1, +seen.slice(6, 8), +seen.slice(9, 11), +seen.slice(11, 13))
 }

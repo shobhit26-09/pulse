@@ -101,3 +101,22 @@ export async function fetchLaunches() {
     provider: l.launch_service_provider?.name ?? '',
   }))
 }
+
+// Significant quakes (USGS "significant" day feed) - these are the ones that
+// matter for a breaking board: felt, damaging, or large.
+export async function fetchSignificantQuakes() {
+  const res = await fetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_day.geojson')
+  if (!res.ok) throw new Error('sig quake fetch failed')
+  const d = await res.json()
+  return (d.features ?? []).map((f) => ({
+    id: f.id,
+    mag: f.properties.mag ?? 0,
+    place: f.properties.place ?? 'Unknown region',
+    time: f.properties.time,
+    lon: f.geometry.coordinates[0],
+    lat: f.geometry.coordinates[1],
+    tsunami: f.properties.tsunami === 1,
+    url: f.properties.url ?? '',
+    tier: (f.properties.mag ?? 0) >= 7 || f.properties.tsunami === 1 ? 3 : 2,
+  }))
+}
