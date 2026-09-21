@@ -1,43 +1,7 @@
-export interface IssPosition {
-  lat: number
-  lon: number
-  altitudeKm: number
-  velocityKmh: number
-  visibility: string
-  timestamp: number
-}
+// Live earth data: USGS quakes, NASA EONET events, ISS, NOAA Kp, launches.
+// All free, keyless, CORS-clean public APIs.
 
-export interface Quake {
-  id: string
-  mag: number
-  place: string
-  time: number
-  lat: number
-  lon: number
-  depthKm: number
-  tsunami: boolean
-}
-
-export type EventKind = 'storm' | 'fire' | 'volcano' | 'ice' | 'other'
-
-export interface EarthEvent {
-  id: string
-  title: string
-  kind: EventKind
-  lat: number
-  lon: number
-  date: string
-}
-
-export interface Launch {
-  id: string
-  name: string
-  net: string
-  pad: string
-  provider: string
-}
-
-export async function fetchIss(): Promise<IssPosition> {
+export async function fetchIss() {
   const res = await fetch('https://api.wheretheiss.at/v1/satellites/25544')
   if (!res.ok) throw new Error('iss fetch failed')
   const d = await res.json()
@@ -51,14 +15,14 @@ export async function fetchIss(): Promise<IssPosition> {
   }
 }
 
-export async function fetchIssTrail(): Promise<{ lat: number; lon: number }[]> {
+export async function fetchIssTrail() {
   const now = Math.floor(Date.now() / 1000)
   const step = 60
-  const stamps: number[] = []
+  const stamps = []
   for (let i = 92; i >= 0; i--) stamps.push(now - i * step)
-  const chunks: number[][] = []
+  const chunks = []
   for (let i = 0; i < stamps.length; i += 40) chunks.push(stamps.slice(i, i + 40))
-  const out: { lat: number; lon: number }[] = []
+  const out = []
   for (const c of chunks) {
     const res = await fetch(`https://api.wheretheiss.at/v1/satellites/25544/positions?timestamps=${c.join(',')}`)
     if (!res.ok) throw new Error('iss trail fetch failed')
@@ -68,11 +32,11 @@ export async function fetchIssTrail(): Promise<{ lat: number; lon: number }[]> {
   return out
 }
 
-export async function fetchQuakes(): Promise<Quake[]> {
+export async function fetchQuakes() {
   const res = await fetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson')
   if (!res.ok) throw new Error('quake fetch failed')
   const d = await res.json()
-  return (d.features ?? []).map((f: any) => ({
+  return (d.features ?? []).map((f) => ({
     id: f.id,
     mag: f.properties.mag ?? 0,
     place: f.properties.place ?? 'Unknown region',
@@ -84,26 +48,25 @@ export async function fetchQuakes(): Promise<Quake[]> {
   }))
 }
 
-const EONET_KIND: Record<string, EventKind> = {
+const EONET_KIND = {
   'Severe Storms': 'storm',
   Wildfires: 'fire',
   Volcanoes: 'volcano',
   'Sea and Lake Ice': 'ice',
 }
 
-export async function fetchEarthEvents(): Promise<EarthEvent[]> {
+export async function fetchEarthEvents() {
   const res = await fetch('https://eonet.gsfc.nasa.gov/api/v3/events?status=open&limit=60')
   if (!res.ok) throw new Error('eonet fetch failed')
   const d = await res.json()
-  const out: EarthEvent[] = []
+  const out = []
   for (const e of d.events ?? []) {
     const cat = e.categories?.[0]?.title ?? ''
     const kind = EONET_KIND[cat]
     if (!kind) continue
     const geo = e.geometry?.[e.geometry.length - 1]
     if (!geo) continue
-    // Some geometries are polygons ([ [ [lon,lat], ... ] ]); take the first coordinate pair
-    let lon: number, lat: number
+    let lon, lat
     if (typeof geo.coordinates[0] === 'number') {
       ;[lon, lat] = geo.coordinates
     } else {
@@ -114,7 +77,7 @@ export async function fetchEarthEvents(): Promise<EarthEvent[]> {
   return out
 }
 
-export async function fetchKpIndex(): Promise<number | null> {
+export async function fetchKpIndex() {
   try {
     const res = await fetch('https://services.swpc.noaa.gov/json/planetary_k_index_1m.json')
     if (!res.ok) return null
@@ -126,11 +89,11 @@ export async function fetchKpIndex(): Promise<number | null> {
   }
 }
 
-export async function fetchLaunches(): Promise<Launch[]> {
+export async function fetchLaunches() {
   const res = await fetch('https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=4')
   if (!res.ok) throw new Error('launch fetch failed')
   const d = await res.json()
-  return (d.results ?? []).map((l: any) => ({
+  return (d.results ?? []).map((l) => ({
     id: l.id,
     name: l.name,
     net: l.net,
