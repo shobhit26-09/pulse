@@ -63,6 +63,7 @@ body {
 .stage {
   flex: 1;
   display: flex;
+  position: relative;
   min-height: 0;
   gap: 14px;
   padding: 4px 20px 0;

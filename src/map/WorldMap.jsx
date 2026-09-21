@@ -70,13 +70,18 @@ export function WorldMap({ quakes, events, iss, trail, layers, selectedId, onSel
 
   const onPointerDown = (e) => {
     drag.current = { x: e.clientX, y: e.clientY, moved: false }
-    e.currentTarget.setPointerCapture(e.pointerId)
   }
   const onPointerMove = (e) => {
     if (!drag.current) return
     const dx = e.clientX - drag.current.x
     const dy = e.clientY - drag.current.y
-    if (Math.abs(dx) + Math.abs(dy) > 4) drag.current.moved = true
+    if (Math.abs(dx) + Math.abs(dy) > 4) {
+      drag.current.moved = true
+      if (!drag.current.captured) {
+        drag.current.captured = true
+        e.currentTarget.setPointerCapture(e.pointerId)
+      }
+    }
     const rect = svgRef.current.getBoundingClientRect()
     setView((v) =>
       clampView({ ...v, x: v.x + (dx * W) / rect.width, y: v.y + (dy * H) / rect.height }),
