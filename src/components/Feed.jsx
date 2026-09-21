@@ -6,19 +6,26 @@ export function Feed({ onPick }) {
 
   useEffect(() => {
     let alive = true
-    const load = () => {
-      fetchGlobalNews()
-        .then(({ articles }) => alive && setState({ status: 'ok', articles }))
-        .catch(() =>
-          alive &&
-          setState((s) => (s.articles.length ? s : { status: 'error', articles: [] })),
-        )
+    let timer
+    const schedule = (ms) => {
+      timer = window.setTimeout(() => alive && load().finally(() => {}), ms)
     }
+    const load = () =>
+      fetchGlobalNews()
+        .then(({ articles }) => {
+          if (!alive) return
+          setState({ status: 'ok', articles })
+          schedule(10 * 60000)
+        })
+        .catch(() => {
+          if (!alive) return
+          setState((s) => (s.articles.length ? s : { status: 'error', articles: [] }))
+          schedule(30000) // rate-limited - try again in 30s, not 10 minutes
+        })
     load()
-    const id = window.setInterval(load, 10 * 60000)
     return () => {
       alive = false
-      window.clearInterval(id)
+      window.clearTimeout(timer)
     }
   }, [])
 
