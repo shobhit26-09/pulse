@@ -7,6 +7,33 @@ const API = 'https://api.gdeltproject.org/api/v2/doc/doc'
 const MIN_GAP_MS = 6500
 const CACHE_TTL_MS = 15 * 60 * 1000
 
+// Curated major outlets only - raw GDELT surfaces partisan blogs and open
+// threads, which reads as junk. BBC/Reuters/AP tier worldwide plus India's
+// majors, since that is the home audience.
+const MAJOR_DOMAINS = [
+  'bbc.com', 'reuters.com', 'apnews.com', 'aljazeera.com', 'cnn.com',
+  'nytimes.com', 'theguardian.com', 'washingtonpost.com', 'bloomberg.com',
+  'cnbc.com', 'npr.org', 'dw.com', 'france24.com', 'abcnews.go.com',
+  'cbsnews.com', 'nbcnews.com', 'sky.com', 'ft.com',
+  'ndtv.com', 'timesofindia.indiatimes.com', 'thehindu.com',
+  'hindustantimes.com', 'indianexpress.com', 'livemint.com',
+]
+const MAJORS = '(' + MAJOR_DOMAINS.map((d) => `domain:${d}`).join(' OR ') + ')'
+
+// Headlines that are site furniture, not news.
+const JUNK = /open thread|category\s*:|live blog:|photo gallery|^video:/i
+
+function clean(articles) {
+  const seenTitles = new Set()
+  return articles.filter((a) => {
+    if (!a.title || JUNK.test(a.title)) return false
+    const t = a.title.toLowerCase().slice(0, 60)
+    if (seenTitles.has(t)) return false
+    seenTitles.add(t)
+    return true
+  })
+}
+
 const cache = new Map()
 let queue = Promise.resolve()
 let lastStart = 0
@@ -51,9 +78,16 @@ export function fetchCountryNews(name) {
   const hit = cached(key)
   if (hit) return Promise.resolve({ articles: hit, stale: false })
   return enqueue(async () => {
-    let articles = await gdelt(`"${name}" sourcelang:english`, { max: 12, timespan: '48h' })
-    if (articles.length === 0) {
-      articles = await gdelt(`"${name}" sourcelang:english`, { max: 12, timespan: '7d' })
+    let articles = clean(
+      await gdelt(`"${name}" sourcelang:english ${MAJORS}`, { max: 12, timespan: '48h' }),
+    )
+    if (articles.length < 3) {
+      // GDELT allows one request per ~5s - respect the gap between the two.
+      await new Promise((r) => setTimeout(r, MIN_GAP_MS))
+      const wider = clean(
+        await gdelt(`"${name}" sourcelang:english ${MAJORS}`, { max: 12, timespan: '7d' }),
+      )
+      if (wider.length > articles.length) articles = wider
     }
     cache.set(key, { ts: Date.now(), data: articles })
     return { articles, stale: false }
@@ -69,8 +103,9 @@ export function fetchGlobalNews() {
     const q =
       '(earthquake OR tsunami OR hurricane OR typhoon OR cyclone OR wildfire OR flood OR ' +
       'election OR "prime minister" OR president OR ceasefire OR summit OR protest OR ' +
-      '"state of emergency" OR sanctions) sourcelang:english'
-    const articles = await gdelt(q, { max: 20, timespan: '24h' })
+      '"state of emergency" OR sanctions OR war OR strike OR killed) sourcelang:english ' +
+      MAJORS
+    const articles = clean(await gdelt(q, { max: 20, timespan: '24h' }))
     cache.set(key, { ts: Date.now(), data: articles })
     return { articles, stale: false }
   })
